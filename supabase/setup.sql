@@ -1,0 +1,40 @@
+-- 새 Supabase 프로젝트의 SQL Editor에서 최초 1회 실행하세요.
+begin;
+create table public.workspaces(id uuid primary key default gen_random_uuid(),name text not null);
+create table public.memberships(workspace_id uuid references public.workspaces(id) on delete cascade,user_id uuid references auth.users(id) on delete cascade,role text not null check(role in ('admin','editor','viewer')),primary key(workspace_id,user_id));
+create table public.projects(id uuid primary key default gen_random_uuid(),workspace_id uuid not null references public.workspaces(id),name text not null,client text not null default '',contractor text not null default '',address text not null default '',manager text not null default '');
+create table public.reports(id uuid primary key default gen_random_uuid(),project_id uuid not null references public.projects(id),work_date date not null,status text not null default 'draft' check(status in ('draft','completed')),body jsonb not null,version integer not null default 1 check(version>0),created_at timestamptz not null default now(),updated_at timestamptz not null default now());
+create index reports_project_date on public.reports(project_id,work_date desc);
+create index memberships_user on public.memberships(user_id);
+alter table public.workspaces enable row level security;
+alter table public.memberships enable row level security;
+alter table public.projects enable row level security;
+alter table public.reports enable row level security;
+create policy memberships_self on public.memberships for select to authenticated using(user_id=(select auth.uid()));
+create policy workspaces_read on public.workspaces for select to authenticated using(exists(select 1 from public.memberships m where m.workspace_id=id and m.user_id=(select auth.uid())));
+create policy projects_read on public.projects for select to authenticated using(exists(select 1 from public.memberships m where m.workspace_id=projects.workspace_id and m.user_id=(select auth.uid())));
+create policy projects_create on public.projects for insert to authenticated with check(exists(select 1 from public.memberships m where m.workspace_id=projects.workspace_id and m.user_id=(select auth.uid()) and m.role in ('admin','editor')));
+create function public.can_use_project(pid uuid,writing boolean default false) returns boolean language sql stable security invoker set search_path='' as $$ select exists(select 1 from public.projects p join public.memberships m on m.workspace_id=p.workspace_id where p.id=pid and m.user_id=(select auth.uid()) and (not writing or m.role in ('admin','editor'))) $$;
+revoke all on function public.can_use_project(uuid,boolean) from public,anon;
+grant execute on function public.can_use_project(uuid,boolean) to authenticated;
+create policy reports_read on public.reports for select to authenticated using(public.can_use_project(project_id,false));
+create policy reports_create on public.reports for insert to authenticated with check(public.can_use_project(project_id,true));
+create policy reports_change on public.reports for update to authenticated using(public.can_use_project(project_id,true)) with check(public.can_use_project(project_id,true));
+create policy reports_delete on public.reports for delete to authenticated using(public.can_use_project(project_id,true));
+create function public.report_stamp() returns trigger language plpgsql security invoker set search_path='' as $$ begin
+ if TG_OP='UPDATE' then
+  if new.project_id<>old.project_id then raise exception '현장 이동은 허용되지 않습니다'; end if;
+  if new.version<>old.version+1 then raise exception 'version 충돌'; end if;
+  new.created_at=old.created_at;
+ end if;
+ new.updated_at=now();return new;end $$;
+create trigger report_stamp before insert or update on public.reports for each row execute function public.report_stamp();
+revoke all on public.workspaces,public.memberships,public.projects,public.reports from anon,authenticated;
+grant select on public.workspaces,public.memberships to authenticated;
+grant select,insert on public.projects to authenticated;
+grant select,insert,update,delete on public.reports to authenticated;
+insert into storage.buckets(id,name,public,file_size_limit) values('field-docs','field-docs',false,10485760) on conflict(id) do nothing;
+create policy docs_read on storage.objects for select to authenticated using(bucket_id='field-docs' and exists(select 1 from public.projects p where p.id::text=(storage.foldername(storage.objects.name))[1] and public.can_use_project(p.id,false)));
+create policy docs_upload on storage.objects for insert to authenticated with check(bucket_id='field-docs' and exists(select 1 from public.projects p where p.id::text=(storage.foldername(storage.objects.name))[1] and public.can_use_project(p.id,true)));
+create policy docs_delete on storage.objects for delete to authenticated using(bucket_id='field-docs' and exists(select 1 from public.projects p where p.id::text=(storage.foldername(storage.objects.name))[1] and public.can_use_project(p.id,true)));
+commit;

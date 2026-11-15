@@ -1,0 +1,24 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import {PGlite} from '@electric-sql/pglite';
+test('설치 SQL: 회사 격리, 조회전용, 비로그인, 파일 경로, 동시수정 검증',async()=>{
+ const db=new PGlite();
+ await db.exec(`create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('app.uid',true),'')::uuid$$;grant usage on schema auth,public to anon,authenticated;grant execute on function auth.uid() to authenticated;create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint);create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);alter table storage.objects enable row level security;grant usage on schema storage to authenticated;grant select,insert,delete on storage.objects to authenticated;create function storage.foldername(text) returns text[] language sql immutable as $$select string_to_array($1,'/')$$;`);
+ await db.exec(await fs.readFile(new URL('../../supabase/setup.sql',import.meta.url),'utf8'));
+ const u1='11111111-1111-4111-8111-111111111111',u2='22222222-2222-4222-8222-222222222222',u3='33333333-3333-4333-8333-333333333333',w1='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',w2='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',p1='cccccccc-cccc-4ccc-8ccc-cccccccccccc',p2='dddddddd-dddd-4ddd-8ddd-dddddddddddd',r1='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+ await db.exec(`insert into auth.users values('${u1}','a@a.com'),('${u2}','b@a.com'),('${u3}','c@a.com');insert into public.workspaces values('${w1}','A'),('${w2}','B');insert into public.memberships values('${w1}','${u1}','editor'),('${w2}','${u2}','editor'),('${w1}','${u3}','viewer');insert into public.projects(id,workspace_id,name) values('${p1}','${w1}','A현장'),('${p2}','${w2}','B현장');insert into public.reports(id,project_id,work_date,body) values('${r1}','${p1}','2026-11-15','{}');`);
+ const as=async uid=>{await db.exec(`reset role;set role authenticated;select set_config('app.uid','${uid}',false);`);};
+ await as(u1);assert.equal((await db.query('select * from public.projects')).rows.length,1);
+ assert.equal((await db.query('select * from public.reports')).rows.length,1);
+ await assert.rejects(db.exec(`insert into public.reports(project_id,work_date,body) values('${p2}','2026-11-15','{}')`));
+ await db.exec(`insert into storage.objects(bucket_id,name) values('field-docs','${p1}/report/file.pdf')`);
+ await assert.rejects(db.exec(`insert into storage.objects(bucket_id,name) values('field-docs','${p2}/report/file.pdf')`));
+ await db.exec(`update public.reports set version=2 where id='${r1}' and version=1`);
+ assert.equal((await db.query(`update public.reports set version=2 where id='${r1}' and version=1 returning id`)).rows.length,0);
+ await assert.rejects(db.exec(`update public.reports set project_id='${p2}',version=3 where id='${r1}'`));
+ await as(u2);assert.equal((await db.query('select * from public.reports')).rows.length,0);assert.equal((await db.query('select * from storage.objects')).rows.length,0);
+ await as(u3);assert.equal((await db.query('select * from public.reports')).rows.length,1);assert.equal((await db.query('select * from storage.objects')).rows.length,1);
+ await assert.rejects(db.exec(`insert into public.reports(project_id,work_date,body) values('${p1}','2026-11-15','{}')`));
+ assert.equal((await db.query(`update public.reports set version=3 where id='${r1}' returning id`)).rows.length,0);
+ await assert.rejects(db.exec(`update public.memberships set role='admin' where user_id='${u3}'`));
+ await db.exec('reset role;set role anon');await assert.rejects(db.query('select * from public.reports'));
+ await db.close();
+});

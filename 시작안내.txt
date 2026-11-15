@@ -1,0 +1,20 @@
+정보통신공사 현장작업일보 v1.0
+
+1. README.md에 설치·운영 설명이 있습니다. 메모장으로도 읽을 수 있습니다.
+2. 프로그램을 PC에서 체험하려면 Node.js 22 이상을 설치하세요.
+3. 압축을 푼 폴더에서 PC실행.cmd를 실행하세요.
+4. 터미널에 나온 http://127.0.0.1:5173 주소를 브라우저에서 엽니다.
+5. 첫 화면의 체험 모드에서는 브라우저 내부에만 기록이 저장됩니다.
+6. GitHub 업로드: 프로젝트 전체를 저장소에 올리세요. node_modules와 .env는 제외됩니다.
+7. Netlify: GitHub 저장소 연결 → npm run build → 배포 폴더 dist.
+8. Supabase: 새 프로젝트 SQL Editor에서 supabase/setup.sql을 최초 1회 실행.
+9. Authentication에서 계정 생성 후 register-team.sql로 회사·권한 등록.
+10. Netlify에 VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY 등록 후 재배포.
+11. 연결·사용안내 메뉴에서 이메일과 비밀번호로 로그인하세요.
+
+Netlify 수동 배포를 빠르게 체험하려면 dist 폴더를 올릴 수 있습니다.
+동봉된 dist는 서버 설정이 없는 체험 모드 빌드입니다.
+실제 공동 운영은 환경변수를 설정해 새로 빌드해야 합니다.
+
+현재 포함: 문서 등록·내용 작성·일보 문장 생성·Word/CSV/JSON 다운로드·PDF 인쇄.
+PDF·한글·사진의 자동 판독, AI 자동학습, 전자결재는 포함하지 않습니다.
